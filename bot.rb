@@ -1,82 +1,78 @@
 require 'telegram/bot'
 require 'dotenv/load'
 
-token = ENV['BOT_TOKEN']
-abort('Помилка: не знайдено BOT_TOKEN у файлі .env') if token.nil? || token.empty?
+token = ENV['BOT_TOKEN'].to_s.strip
+abort('Помилка: додайте BOT_TOKEN у файл .env.') if token.empty?
 
-# Допоміжний метод для формування головного меню з inline-кнопками
-def main_menu_markup
-  kb = [
-    [
-      Telegram::Bot::Types::InlineKeyboardButton.new(text: '📚 Про проєкт', callback_data: 'about'),
-      Telegram::Bot::Types::InlineKeyboardButton.new(text: '⚙️ Стек технологій', callback_data: 'stack')
-    ],
-    [
-      Telegram::Bot::Types::InlineKeyboardButton.new(text: '🎲 Випадкова порада', callback_data: 'tip_new_msg')
-    ],
-    [
-      Telegram::Bot::Types::InlineKeyboardButton.new(text: '❌ Закрити меню', callback_data: 'close')
-    ]
-  ]
-  Telegram::Bot::Types::InlineKeyboardMarkup.new(inline_keyboard: kb)
-end
-
-# Кнопка повернення до головного меню
-def back_button_markup
-  kb = [
-    [Telegram::Bot::Types::InlineKeyboardButton.new(text: '⬅️ Назад до меню', callback_data: 'back_to_main')]
-  ]
-  Telegram::Bot::Types::InlineKeyboardMarkup.new(inline_keyboard: kb)
-end
+MENU_TEXT = 'Оберіть потрібний розділ меню:'.freeze
+DOCUMENTATION_URL = 'https://core.telegram.org/bots/api#inlinekeyboardmarkup'.freeze
 
 TIPS = [
-  'Використовуйте .env та .gitignore, щоб не публікувати API-токени в репозиторії.',
-  'У Ruby метод edit_message_text дозволяє оновлювати меню без створення нових повідомлень у чаті.',
-  'Завжди викликайте answer_callback_query, щоб прибрати індикатор завантаження на кнопці в користувача.'
+  'Додайте .env і *.bak до .gitignore, щоб Git ігнорував токен і резервні копії.',
+  'Використовуйте edit_message_text, щоб оновити меню в поточному повідомленні.',
+  'Викликайте answer_callback_query після натискання callback-кнопки, щоб прибрати індикатор завантаження.'
 ].freeze
 
-puts 'Бот успішно запущений і очікує повідомлень...'
+def callback_button(text, data)
+  Telegram::Bot::Types::InlineKeyboardButton.new(text: text, callback_data: data)
+end
+
+def main_menu_markup
+  Telegram::Bot::Types::InlineKeyboardMarkup.new(
+    inline_keyboard: [
+      [callback_button('📚 Про проєкт', 'about'), callback_button('⚙️ Стек технологій', 'stack')],
+      [callback_button('🎲 Випадкова порада', 'tip_new_msg')],
+      [callback_button('❌ Закрити меню', 'close')]
+    ]
+  )
+end
+
+def section_markup(include_documentation: false)
+  rows = []
+  if include_documentation
+    rows << [Telegram::Bot::Types::InlineKeyboardButton.new(
+      text: '🔗 Документація Telegram',
+      url: DOCUMENTATION_URL
+    )]
+  end
+  rows << [callback_button('⬅️ Назад до меню', 'back_to_main')]
+  Telegram::Bot::Types::InlineKeyboardMarkup.new(inline_keyboard: rows)
+end
 
 Telegram::Bot::Client.run(token) do |bot|
+  puts 'Бот очікує повідомлень. Для зупинки натисніть Ctrl+C.'
+
   bot.listen do |update|
     case update
-    # 1. Обробка натискання на Inline-кнопки
     when Telegram::Bot::Types::CallbackQuery
+      bot.api.answer_callback_query(callback_query_id: update.id)
+      next unless update.message.is_a?(Telegram::Bot::Types::Message)
+
       chat_id = update.message.chat.id
       message_id = update.message.message_id
-
-      # Обов'язкове підтвердження натискання для Telegram API
-      bot.api.answer_callback_query(callback_query_id: update.id)
 
       case update.data
       when 'about'
         bot.api.edit_message_text(
           chat_id: chat_id,
           message_id: message_id,
-          text: "📚 *Про проєкт*\n\nЦей бот розроблений мовою Ruby для демонстрації роботи з Inline-клавіатурами (`InlineKeyboardMarkup`) та динамічного оновлення повідомлень.",
-          parse_mode: 'Markdown',
-          reply_markup: back_button_markup
+          text: "📚 Про проєкт\n\nЦей бот демонструє роботу з inline-кнопками та оновлення повідомлень у Telegram. Кнопка нижче відкриває офіційну документацію.",
+          reply_markup: section_markup(include_documentation: true)
         )
       when 'stack'
         bot.api.edit_message_text(
           chat_id: chat_id,
           message_id: message_id,
-          text: "⚙️ *Використані технології*\n\n• Мова: Ruby\n• Бібліотека: `telegram-bot-ruby`\n• Конфігурація: `dotenv`",
-          parse_mode: 'Markdown',
-          reply_markup: back_button_markup
+          text: "⚙️ Використані технології\n\n• Ruby — мова програмування\n• telegram-bot-ruby — клієнт Telegram Bot API\n• dotenv — завантаження токена з .env",
+          reply_markup: section_markup
         )
       when 'tip_new_msg'
-        # Надсилання нового повідомлення у відповідь на натискання кнопки
-        bot.api.send_message(
-          chat_id: chat_id,
-          text: "💡 *Порада розробнику:*\n#{TIPS.sample}",
-          parse_mode: 'Markdown'
-        )
+        bot.api.send_message(chat_id: chat_id, text: "💡 Порада розробнику\n\n#{TIPS.sample}")
       when 'back_to_main'
         bot.api.edit_message_text(
           chat_id: chat_id,
           message_id: message_id,
-          text: 'Оберіть потрібний розділ меню:',
+          text: MENU_TEXT,
           reply_markup: main_menu_markup
         )
       when 'close'
@@ -86,38 +82,32 @@ Telegram::Bot::Client.run(token) do |bot|
           text: 'Меню закрито. Щоб відкрити його знову, введіть /menu.'
         )
       end
-
-    # 2. Обробка текстових команд
     when Telegram::Bot::Types::Message
       next unless update.text
 
       case update.text.strip
       when '/start'
+        name = update.from&.first_name
+        greeting = name ? "Привіт, #{name}! 👋" : 'Привіт! 👋'
         bot.api.send_message(
           chat_id: update.chat.id,
-          text: "Привіт, #{update.from.first_name}! 👋\nЯ бот з інтерактивним меню на Ruby.\n\nВведіть команду /menu, щоб відкрити панель керування."
+          text: "#{greeting}\nЯ бот з інтерактивним меню на Ruby. Введіть /menu, щоб відкрити меню."
         )
       when '/menu'
-        bot.api.send_message(
-          chat_id: update.chat.id,
-          text: 'Оберіть потрібний розділ меню:',
-          reply_markup: main_menu_markup
-        )
+        bot.api.send_message(chat_id: update.chat.id, text: MENU_TEXT, reply_markup: main_menu_markup)
       when '/help'
         bot.api.send_message(
           chat_id: update.chat.id,
-          text: "Доступні команди:\n/start — запуск бота\n/menu — відкрити інтерактивне меню з кнопками\n/help — довідка"
+          text: "Доступні команди\n/start — привітання\n/menu — відкрити меню з кнопками\n/help — довідка"
         )
       else
         bot.api.send_message(
           chat_id: update.chat.id,
-          text: 'Невідома команда. Скористайтеся /menu для виклику кнопок або /help для довідки.'
+          text: 'Невідома команда. Скористайтеся /menu або /help.'
         )
       end
     end
   rescue Telegram::Bot::Exceptions::ResponseError => e
-    warn "Помилка Telegram API: #{e.message}"
-  rescue StandardError => e
-    warn "Непередбачена помилка: #{e.class} — #{e.message}"
+    warn "Помилка Telegram API: #{e.message.gsub(token, '[TOKEN]')}"
   end
 end
